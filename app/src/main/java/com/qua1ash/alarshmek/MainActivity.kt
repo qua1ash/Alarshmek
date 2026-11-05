@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -58,11 +59,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.util.Calendar
+import kotlin.math.abs
 
 enum class AlarmDay(val shortName: String) {
     MONDAY("Пн"), TUESDAY("Вт"), WEDNESDAY("Ср"), THURSDAY("Чт"),
     FRIDAY("Пт"), SATURDAY("Сб"), SUNDAY("Вс")
 }
+
+private const val PICKER_CYCLE_COUNT = 10_000
 
 data class Alarm(
     val id: Long,
@@ -255,22 +259,32 @@ private fun ModePlaceholder(title: String, description: String) {
 @Composable
 private fun NumberPicker(value: Int, range: IntRange, onValueChange: (Int) -> Unit) {
     val rangeSize = range.count()
+    val itemCount = rangeSize * PICKER_CYCLE_COUNT
     val initialIndex = remember(range, value) {
-        val middle = Int.MAX_VALUE / 2
+        val middle = itemCount / 2
         middle - (middle % rangeSize) + (value - range.first)
     }
     val state = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
-    LaunchedEffect(state, range) {
-        snapshotFlow { state.firstVisibleItemIndex }
-            .collect { index -> onValueChange(range.first + index % rangeSize) }
+    LaunchedEffect(state, rangeSize) {
+        snapshotFlow { state.isScrollInProgress }
+            .collect { isScrolling ->
+                if (!isScrolling) {
+                    val viewportCenter = state.layoutInfo.viewportEndOffset / 2
+                    val centeredIndex = state.layoutInfo.visibleItemsInfo
+                        .minByOrNull { item -> abs(item.offset + item.size / 2 - viewportCenter) }
+                        ?.index ?: state.firstVisibleItemIndex
+                    onValueChange(range.first + centeredIndex % rangeSize)
+                }
+            }
     }
     LazyColumn(
         state = state,
+        flingBehavior = rememberSnapFlingBehavior(state),
         modifier = Modifier.width(104.dp).height(168.dp),
         contentPadding = PaddingValues(vertical = 56.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        items(Int.MAX_VALUE) { index ->
+        items(itemCount) { index ->
             val number = range.first + index % rangeSize
             TextButton(onClick = { onValueChange(number) }, modifier = Modifier.height(56.dp)) {
                 Text(
